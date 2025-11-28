@@ -26,10 +26,14 @@ public class VisitService {
     private final VisitStatusHistoryRepository historyRepository;
     private final NotificationService notificationService;
 
-    // ----- helper -----
+    // --------------------------------------------------------------------
+    // HELPERS
+    // --------------------------------------------------------------------
 
-    private void recordStatusChange(Visit visit, VisitStatus from, VisitStatus to,
-                                    ActorType actorType, Long actorId, String reason) {
+    private void recordStatusChange(
+            Visit visit, VisitStatus from, VisitStatus to,
+            ActorType actorType, Long actorId, String reason) {
+
         VisitStatusHistory h = new VisitStatusHistory();
         h.setVisit(visit);
         h.setFromStatus(from);
@@ -47,7 +51,7 @@ public class VisitService {
                 .salesmanId(v.getSalesman().getId())
                 .locationId(v.getLocation().getId())
                 .scheduledDate(v.getScheduledDate())
-                .priority(v.getPriority())
+                .priority(v.getPriority())          // enum is fine
                 .status(v.getStatus())
                 .arrivalTime(v.getArrivalTime())
                 .departureTime(v.getDepartureTime())
@@ -55,25 +59,34 @@ public class VisitService {
                 .build();
     }
 
-    // ----- ADMIN SIDE -----
+    // --------------------------------------------------------------------
+    // ADMIN API
+    // --------------------------------------------------------------------
 
     @Transactional
     public VisitResponse createVisit(CreateVisitRequest req) {
+
         Salesman s = salesmanRepository.findById(req.getSalesmanId())
                 .orElseThrow(() -> new IllegalArgumentException("Salesman not found"));
+
         Location location = locationRepository.findById(req.getLocationId())
                 .orElseThrow(() -> new IllegalArgumentException("Location not found"));
 
         Visit visit = new Visit();
         visit.setSalesman(s);
         visit.setLocation(location);
+
+        // IMPORTANT CHANGE: convert string -> enum
         visit.setPriority(req.getPriority());
+
         visit.setScheduledDate(req.getScheduledDate());
         visit.setStatus(VisitStatus.ASSIGNED);
 
         Visit saved = visitRepository.save(visit);
-        recordStatusChange(saved, null, VisitStatus.ASSIGNED, ActorType.ADMIN, null,
-                "Assigned via admin create");
+
+        recordStatusChange(saved, null, VisitStatus.ASSIGNED,
+                ActorType.ADMIN, null, "Assigned via admin create");
+
         return toDto(saved);
     }
 
@@ -81,26 +94,27 @@ public class VisitService {
     public List<VisitResponse> getScheduleForSalesman(Long salesmanId, LocalDate date) {
         return visitRepository
                 .findBySalesmanIdAndScheduledDateOrderByPriorityDesc(salesmanId, date)
-                .stream().map(this::toDto)
+                .stream()
+                .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
-    // ----- SALESMAN SIDE -----
+    // --------------------------------------------------------------------
+    // SALESMAN API
+    // --------------------------------------------------------------------
 
     @Transactional(readOnly = true)
     public VisitResponse getNextVisitForSalesman(Long salesmanId, LocalDate date) {
         return visitRepository
                 .findFirstBySalesmanIdAndScheduledDateAndStatusInOrderByPriorityDesc(
-                        salesmanId,
-                        date,
-                        List.of(VisitStatus.ASSIGNED)
-                )
+                        salesmanId, date, List.of(VisitStatus.ASSIGNED))
                 .map(this::toDto)
                 .orElse(null);
     }
 
     @Transactional
     public VisitResponse startVisitManual(Long visitId, Long salesmanId) {
+
         Visit visit = visitRepository.findById(visitId)
                 .orElseThrow(() -> new IllegalArgumentException("Visit not found"));
 
@@ -108,11 +122,11 @@ public class VisitService {
             throw new IllegalStateException("Visit does not belong to this salesman");
         }
 
-        VisitStatus old = visit.getStatus();
+        VisitStatus from = visit.getStatus();
         visit.setStatus(VisitStatus.IN_PROGRESS);
         visit.setArrivalTime(Instant.now());
 
-        recordStatusChange(visit, old, VisitStatus.IN_PROGRESS,
+        recordStatusChange(visit, from, VisitStatus.IN_PROGRESS,
                 ActorType.SALESMAN, salesmanId, "Salesman started visit (manual)");
 
         return toDto(visit);
@@ -120,6 +134,7 @@ public class VisitService {
 
     @Transactional
     public VisitResponse completeVisit(Long visitId, Long salesmanId) {
+
         Visit visit = visitRepository.findById(visitId)
                 .orElseThrow(() -> new IllegalArgumentException("Visit not found"));
 
@@ -129,6 +144,7 @@ public class VisitService {
 
         VisitStatus from = visit.getStatus();
         visit.setStatus(VisitStatus.COMPLETED);
+
         if (visit.getDepartureTime() == null) {
             visit.setDepartureTime(Instant.now());
         }
@@ -147,6 +163,7 @@ public class VisitService {
 
     @Transactional
     public VisitResponse markUnavailableAndSkip(Long visitId, Long salesmanId, String reason) {
+
         Visit visit = visitRepository.findById(visitId)
                 .orElseThrow(() -> new IllegalArgumentException("Visit not found"));
 
@@ -157,6 +174,7 @@ public class VisitService {
         VisitStatus from = visit.getStatus();
         visit.setStatus(VisitStatus.UNAVAILABLE);
         visit.setSkipReason(reason);
+
         recordStatusChange(visit, from, VisitStatus.UNAVAILABLE,
                 ActorType.SALESMAN, salesmanId, reason);
 
@@ -168,21 +186,27 @@ public class VisitService {
 
         VisitStatus prev = visit.getStatus();
         visit.setStatus(VisitStatus.SKIPPED);
+
         recordStatusChange(visit, prev, VisitStatus.SKIPPED,
                 ActorType.SYSTEM, null, "Auto-skipped after unavailability");
 
         return toDto(visit);
     }
 
-    // ----- Geofence integration -----
+    // --------------------------------------------------------------------
+    // GEO-FENCE AUTO ARRIVE/DEPART
+    // --------------------------------------------------------------------
 
     @Transactional
     public void markArrivedByGeofence(Visit visit, Instant at) {
         VisitStatus from = visit.getStatus();
+
         if (visit.getArrivalTime() == null) {
             visit.setArrivalTime(at != null ? at : Instant.now());
         }
+
         visit.setStatus(VisitStatus.IN_PROGRESS);
+
         recordStatusChange(visit, from, VisitStatus.IN_PROGRESS,
                 ActorType.SYSTEM, null, "Auto-arrival via geofence");
     }
@@ -190,12 +214,14 @@ public class VisitService {
     @Transactional
     public void markDepartedByGeofence(Visit visit, Instant at) {
         VisitStatus from = visit.getStatus();
+
         if (visit.getDepartureTime() == null) {
             visit.setDepartureTime(at != null ? at : Instant.now());
         }
+
         visit.setStatus(VisitStatus.COMPLETED);
+
         recordStatusChange(visit, from, VisitStatus.COMPLETED,
                 ActorType.SYSTEM, null, "Auto-departure via geofence");
     }
 }
-

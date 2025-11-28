@@ -24,11 +24,11 @@ public class Visit {
 
     private LocalDate scheduledDate;
 
-    // higher number = higher priority (you can invert if you prefer)
-    private Integer priority;
-
     @Enumerated(EnumType.STRING)
     private VisitStatus status = VisitStatus.ASSIGNED;
+
+    @Column(name = "priority", nullable = false)
+    private VisitPriority priority;
 
     // timestamps for this execution
     private Instant arrivalTime;       // geofence-arrival time

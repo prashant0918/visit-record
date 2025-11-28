@@ -2,6 +2,7 @@ package org.servlet.ex.visitrecord.dto;
 
 import lombok.Builder;
 import lombok.Getter;
+import org.servlet.ex.visitrecord.domain.VisitPriority;
 import org.servlet.ex.visitrecord.domain.VisitStatus;
 
 import java.time.Instant;
@@ -15,7 +16,7 @@ public class VisitResponse {
     private Long salesmanId;
     private Long locationId;
     private LocalDate scheduledDate;
-    private Integer priority;
+    private VisitPriority priority;
     private VisitStatus status;
     private Instant arrivalTime;
     private Instant departureTime;

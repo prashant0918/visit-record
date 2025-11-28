@@ -3,6 +3,7 @@ package org.servlet.ex.visitrecord.dto;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
+import org.servlet.ex.visitrecord.domain.VisitPriority;
 
 import java.time.LocalDate;
 
@@ -19,7 +20,8 @@ public class CreateVisitRequest {
     @NotNull
     private LocalDate scheduledDate;
 
+
     @NotNull
-    private Integer priority;
+    private VisitPriority priority;
 }
 
