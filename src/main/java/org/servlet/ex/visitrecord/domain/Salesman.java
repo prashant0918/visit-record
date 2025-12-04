@@ -12,12 +12,14 @@ public class Salesman {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
+    @Version
+    private Long version;
     private String name;
     private String phone;
     private String email;
 
-    // e.g. ACTIVE / INACTIVE
-    private String status;
+    @Enumerated(EnumType.STRING)
+    private SalesmanStatus status;
+
 }
 

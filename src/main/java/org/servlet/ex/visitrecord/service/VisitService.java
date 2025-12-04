@@ -3,6 +3,7 @@ package org.servlet.ex.visitrecord.service;
 import lombok.RequiredArgsConstructor;
 import org.servlet.ex.visitrecord.domain.*;
 import org.servlet.ex.visitrecord.dto.CreateVisitRequest;
+import org.servlet.ex.visitrecord.dto.UpdateVisitRequest;
 import org.servlet.ex.visitrecord.dto.VisitResponse;
 import org.servlet.ex.visitrecord.repository.LocationRepository;
 import org.servlet.ex.visitrecord.repository.SalesmanRepository;
@@ -26,10 +27,6 @@ public class VisitService {
     private final VisitStatusHistoryRepository historyRepository;
     private final NotificationService notificationService;
 
-    // --------------------------------------------------------------------
-    // HELPERS
-    // --------------------------------------------------------------------
-
     private void recordStatusChange(
             Visit visit, VisitStatus from, VisitStatus to,
             ActorType actorType, Long actorId, String reason) {
@@ -48,8 +45,8 @@ public class VisitService {
     private VisitResponse toDto(Visit v) {
         return VisitResponse.builder()
                 .id(v.getId())
-                .salesmanId(v.getSalesman().getId())
-                .locationId(v.getLocation().getId())
+                .salesmanId(v.getSalesman() != null ? v.getSalesman().getId() : null)
+                .locationId(v.getLocation() != null ? v.getLocation().getId() : null)
                 .scheduledDate(v.getScheduledDate())
                 .priority(v.getPriority())          // enum is fine
                 .status(v.getStatus())
@@ -68,6 +65,10 @@ public class VisitService {
 
         Salesman s = salesmanRepository.findById(req.getSalesmanId())
                 .orElseThrow(() -> new IllegalArgumentException("Salesman not found"));
+        if (s.getStatus() != SalesmanStatus.ACTIVE) {
+            s.setStatus(SalesmanStatus.ACTIVE);
+            salesmanRepository.save(s);
+        }
 
         Location location = locationRepository.findById(req.getLocationId())
                 .orElseThrow(() -> new IllegalArgumentException("Location not found"));
@@ -76,9 +77,7 @@ public class VisitService {
         visit.setSalesman(s);
         visit.setLocation(location);
 
-        // IMPORTANT CHANGE: convert string -> enum
         visit.setPriority(req.getPriority());
-
         visit.setScheduledDate(req.getScheduledDate());
         visit.setStatus(VisitStatus.ASSIGNED);
 
@@ -98,10 +97,6 @@ public class VisitService {
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
-
-    // --------------------------------------------------------------------
-    // SALESMAN API
-    // --------------------------------------------------------------------
 
     @Transactional(readOnly = true)
     public VisitResponse getNextVisitForSalesman(Long salesmanId, LocalDate date) {
@@ -193,9 +188,42 @@ public class VisitService {
         return toDto(visit);
     }
 
-    // --------------------------------------------------------------------
-    // GEO-FENCE AUTO ARRIVE/DEPART
-    // --------------------------------------------------------------------
+    @Transactional
+    public VisitResponse updateVisit(Long id, UpdateVisitRequest req) {
+        Visit existing = visitRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Visit not found"));
+
+        // keep track of status for audit
+        VisitStatus before = existing.getStatus();
+
+        if (req.getSalesmanId() != null) {
+            Salesman s = salesmanRepository.findById(req.getSalesmanId())
+                    .orElseThrow(() -> new IllegalArgumentException("Salesman not found"));
+            existing.setSalesman(s);
+            if (s.getStatus() != SalesmanStatus.ACTIVE) {
+                s.setStatus(SalesmanStatus.ACTIVE);
+                salesmanRepository.save(s);
+            }
+        }
+
+        if (req.getLocationId() != null) {
+            Location loc = locationRepository.findById(req.getLocationId())
+                    .orElseThrow(() -> new IllegalArgumentException("Location not found"));
+            existing.setLocation(loc);
+        }
+
+        if (req.getScheduledDate() != null) existing.setScheduledDate(req.getScheduledDate());
+        if (req.getPriority() != null) existing.setPriority(req.getPriority());
+
+        if (req.getStatus() != null && req.getStatus() != existing.getStatus()) {
+            VisitStatus newStatus = req.getStatus();
+            existing.setStatus(newStatus);
+            recordStatusChange(existing, before, newStatus, ActorType.ADMIN, null, "Status changed by admin");
+        }
+
+        Visit saved = visitRepository.save(existing);
+        return toDto(saved);
+    }
 
     @Transactional
     public void markArrivedByGeofence(Visit visit, Instant at) {
@@ -225,3 +253,4 @@ public class VisitService {
                 ActorType.SYSTEM, null, "Auto-departure via geofence");
     }
 }
+
